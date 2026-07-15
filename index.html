@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="ko" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>실시간 재고 분석 및 요약 대시보드</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f5f7ff',
+              100: '#ebf0ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+  <style>
+    body { font-family: 'Pretendard', sans-serif; }
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .dark ::-webkit-scrollbar-thumb { background: #475569; }
+  </style>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100 min-h-screen transition-colors duration-200">
+
+  <header class="sticky top-0 z-40 w-full border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/80 backdrop-blur">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="p-2 bg-brand-500 text-white rounded-xl shadow-md shadow-brand-500/20">
+          <i data-lucide="layout-dashboard" class="w-6 h-6"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold tracking-tight">StockFlow</h1>
+          <p class="text-xs text-slate-500 dark:text-slate-400">실시간 재고 분석 시스템</p>
+        </div>
+      </div>
+      
+      <div class="flex items-center gap-3">
+        <button id="reset-btn" class="hidden items-center gap-1.5 px-3.5 py-1.5 text-sm font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 rounded-lg hover:bg-rose-100 transition">
+          <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+          데이터 리셋
+        </button>
+        <button id="theme-toggle" class="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+          <i id="theme-icon" data-lucide="moon" class="w-5 h-5 text-slate-600 dark:text-slate-300"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    
+    <section id="upload-container" class="max-w-2xl mx-auto my-12">
+      <div class="text-center mb-8">
+        <h2 class="text-3xl font-extrabold tracking-tight sm:text-4xl bg-gradient-to-r from-brand-500 to-indigo-600 bg-clip-text text-transparent">
+          스마트 재고 데이터를 한눈에.
+        </h2>
+        <p class="mt-3 text-slate-500 dark:text-slate-400">
+          Excel(.xlsx, .xls) 또는 CSV 파일을 드래그 앤 드롭하여 바로 시각화 보고서를 생성하세요.
+        </p>
+      </div>
+
+      <div id="dropzone" class="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-brand-500 dark:hover:border-brand-500 bg-white dark:bg-slate-950 rounded-2xl p-12 text-center cursor-pointer transition shadow-sm hover:shadow-md group">
+        <input type="file" id="file-input" class="hidden" accept=".xlsx, .xls, .csv">
+        <div class="flex flex-col items-center">
+          <div class="p-4 bg-brand-50 dark:bg-brand-950/40 text-brand-500 rounded-2xl mb-4 group-hover:scale-110 transition-transform">
+            <i data-lucide="upload-cloud" class="w-10 h-10"></i>
+          </div>
+          <p class="text-base font-semibold text-slate-700 dark:text-slate-300">클릭하거나 파일을 여기로 끌어다 놓으세요</p>
+          <p class="text-xs text-slate-400 mt-2">XLSX, XLS, CSV 형식 지원 (최대 50MB)</p>
+          
+          <div class="mt-6 flex flex-wrap justify-center gap-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg max-w-md">
+            <span class="font-medium text-brand-500">필수 열:</span>
+            <span>창고, 품목, 입고일, 수량, 위치, 장기재고기준일</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div id="dashboard-content" class="hidden space-y-8 animate-[fadeIn_0.4s_ease-out]">
+      
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div class="bg-white dark:bg-slate-950 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold text-slate-400 dark:text-slate-500 tracking-wider uppercase">총 재고 수량</p>
+            <h3 id="kpi-total-qty" class="text-3xl font-bold tracking-tight mt-1">0</h3>
+          </div>
+          <div class="p-3 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-500 rounded-xl">
+            <i data-lucide="package" class="w-6 h-6"></i>
+          </div>
+        </div>
+        
+        <div class="bg-white dark:bg-slate-950 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold text-slate-400 dark:text-slate-500 tracking-wider uppercase">등록 품목 수</p>
+            <h3 id="kpi-total-items" class="text-3xl font-bold tracking-tight mt-1">0</h3>
+          </div>
+          <div class="p-3 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-500 rounded-xl">
+            <i data-lucide="tag" class="w-6 h-6"></i>
+          </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-950 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold text-slate-400 dark:text-slate-500 tracking-wider uppercase">운영 창고 수</p>
+            <h3 id="kpi-total-wh" class="text-3xl font-bold tracking-tight mt-1">0</h3>
+          </div>
+          <div class="p-3 bg-amber-50 dark:bg-amber-950/40 text-amber-500 rounded-xl">
+            <i data-lucide="warehouse" class="w-6 h-6"></i>
+          </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-950 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold text-slate-400 dark:text-slate-500 tracking-wider uppercase">장기 재고 경고</p>
+            <h3 id="kpi-alert-qty" class="text-3xl font-bold tracking-tight mt-1 text-rose-500">0</h3>
+          </div>
+          <div class="p-3 bg-rose-50 dark:bg-rose-950/40 text-rose-500 rounded-xl">
+            <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white dark:bg-slate-950 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div class="flex items-center gap-2 mb-4">
+          <i data-lucide="sliders-horizontal" class="w-5 h-5 text-brand-500"></i>
+          <h4 class="font-bold">지능형 필터 제어판</h4>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">창고 선택</label>
+            <select id="filter-warehouse" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+              <option value="ALL">전체 창고</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">구역 위치</label>
+            <select id="filter-location" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+              <option value="ALL">전체 위치</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">품목 검색 (마스크/코드)</label>
+            <div class="relative">
+              <input type="text" id="filter-search" placeholder="코드 입력 및 검색..." class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+              <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="bg-white dark:bg-slate-950 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col h-[350px]">
+          <h4 class="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4 flex items-center gap-1.5">
+            <i data-lucide="bar-chart-3" class="w-4 h-4 text-indigo-500"></i> 창고별 재고 수량
+          </h4>
+          <div class="flex-1 relative">
+            <canvas id="chart-wh"></canvas>
+          </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-950 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col h-[350px]">
+          <h4 class="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4 flex items-center gap-1.5">
+            <i data-lucide="align-left" class="w-4 h-4 text-emerald-500"></i> 품목별 상위 수량
+          </h4>
+          <div class="flex-1 relative">
+            <canvas id="chart-items"></canvas>
+          </div>
+        </div>
+
+        <div class="bg-white dark:bg-slate-950 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col h-[350px]">
+          <h4 class="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4 flex items-center gap-1.5">
+            <i data-lucide="pie-chart" class="w-4 h-4 text-amber-500"></i> 위치별 재고 분포
+          </h4>
+          <div class="flex-1 relative flex items-center justify-center">
+            <canvas id="chart-location" style="max-height: 250px;"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4">
+          <div class="flex items-center gap-2">
+            <i data-lucide="database" class="w-5 h-5 text-brand-500"></i>
+            <h4 class="font-bold">재고 원장 내역</h4>
+            <span id="table-row-count" class="text-xs bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full text-slate-600 dark:text-slate-300 font-medium">0건</span>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead class="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-xs font-semibold uppercase border-b border-slate-100 dark:border-slate-800">
+              <tr>
+                <th class="px-6 py-4">창고</th>
+                <th class="px-6 py-4">품목</th>
+                <th class="px-6 py-4 text-center">입고일</th>
+                <th class="px-6 py-4 text-right">수량</th>
+                <th class="px-6 py-4">위치</th>
+                <th class="px-6 py-4 text-center">장기재고 기준일</th>
+                <th class="px-6 py-4 text-center">상태</th>
+              </tr>
+            </thead>
+            <tbody id="table-body" class="divide-y divide-slate-100 dark:divide-slate-800">
+              </tbody>
+          </table>
+        </div>
+        
+        <div class="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+          <button id="prev-page" class="px-3.5 py-1.5 text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition disabled:opacity-50">이전</button>
+          <span id="page-indicator" class="text-xs text-slate-500">Page 1 of 1</span>
+          <button id="next-page" class="px-3.5 py-1.5 text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition disabled:opacity-50">다음</button>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <script>
+    // State management
+    let rawStockData = [];
+    let filteredData = [];
+    let charts = {};
+    let currentPage = 1;
+    const itemsPerPage = 10;
+    const TODAY = new Date('2026-07-14'); // System Anchor Time
+
+    // DOM Elements
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('file-input');
+    const uploadContainer = document.getElementById('upload-container');
+    const dashboardContent = document.getElementById('dashboard-content');
+    const resetBtn = document.getElementById('reset-btn');
+    const themeToggle = document.getElementById('theme-toggle');
+    const themeIcon = document.getElementById('theme-icon');
+
+    // Filter Elements
+    const filterWh = document.getElementById('filter-warehouse');
+    const filterLoc = document.getElementById('filter-location');
+    const filterSearch = document.getElementById('filter-search');
+
+    // --- Core Parsing & Normalization Logic ---
+    function normalizeDate(val) {
+      if (!val) return null;
+      let dString = String(val).trim();
+      
+      // Excel Serial date number check
+      if (/^\d{5}$/.test(dString)) {
+        const dateNum = parseInt(dString, 10);
+        return new Date((dateNum - 25569) * 86400 * 1000);
+      }
+
+      // YYYYMMDD check
+      if (/^\d{8}$/.test(dString)) {
+        const year = dString.slice(0, 4);
+        const month = dString.slice(4, 6);
+        const day = dString.slice(6, 8);
+        return new Date(`${year}-${month}-${day}`);
+      }
+
+      // YYYY-MM-DD or custom formats
+      const parsed = Date.parse(dString);
+      if (!isNaN(parsed)) {
+        return new Date(parsed);
+      }
+      return null;
+    }
+
+    function checkIsLongTerm(itemDate, limitDate) {
+      if (!itemDate) return false;
+      
+      if (limitDate) {
+        // If specific rule-date given, check if current (2026-07-14) is past the threshold relative to storage time
+        return TODAY > limitDate;
+      } else {
+        // Default 90 days fallback
+        const diffTime = Math.abs(TODAY - itemDate);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays >= 90;
+      }
+    }
+
+    // --- Excel Parsing using SheetJS ---
+    function handleFile(file) {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        
+        // Custom headers search and column mapper
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+        
+        rawStockData = jsonData.map(row => {
+          const warehouse = row['창고'] || '';
+          const item = row['품목'] || '';
+          const rawInDate = row['입고일'] || '';
+          const quantity = parseInt(row['수량']) || 0;
+          const location = row['위치'] || '';
+          const rawLimitDate = row['장기재고기준일'] || '';
+
+          const parsedInDate = normalizeDate(rawInDate);
+          
+          let parsedLimitDate = null;
+          if (rawLimitDate && String(rawLimitDate).toUpperCase() !== 'NULL') {
+            parsedLimitDate = normalizeDate(rawLimitDate);
+          }
+
+          const isLongTerm = checkIsLongTerm(parsedInDate, parsedLimitDate);
+
+          return {
+            warehouse,
+            item,
+            inDate: parsedInDate,
+            quantity,
+            location,
+            limitDate: parsedLimitDate,
+            isLongTerm
+          };
+        }).filter(item => item.warehouse || item.item); // Filter blank row placeholders
+
+        initDashboard();
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    // --- Filter Generation & Application ---
+    function initFilters() {
+      const warehouses = [...new Set(rawStockData.map(d => d.warehouse))].sort();
+      const locations = [...new Set(rawStockData.map(d => d.location))].sort();
+
+      // Clear dynamic filters except 'ALL'
+      filterWh.innerHTML = '<option value="ALL">전체 창고</option>';
+      filterLoc.innerHTML = '<option value="ALL">전체 위치</option>';
+
+      warehouses.forEach(wh => {
+        if(wh) filterWh.innerHTML += `<option value="${wh}">${wh}</option>`;
+      });
+      locations.forEach(loc => {
+        if(loc) filterLoc.innerHTML += `<option value="${loc}">${loc}</option>`;
+      });
+
+      filterWh.value = "ALL";
+      filterLoc.value = "ALL";
+      filterSearch.value = "";
+    }
+
+    function applyFilters() {
+      const selectedWh = filterWh.value;
+      const selectedLoc = filterLoc.value;
+      const searchVal = filterSearch.value.toLowerCase().trim();
+
+      filteredData = rawStockData.filter(d => {
+        const matchWh = (selectedWh === "ALL" || d.warehouse === selectedWh);
+        const matchLoc = (selectedLoc === "ALL" || d.location === selectedLoc);
+        const matchSearch = (searchVal === "" || d.item.toLowerCase().includes(searchVal));
+        return matchWh && matchLoc && matchSearch;
+      });
+
+      currentPage = 1;
+      updateKPIs();
+      renderCharts();
+      renderTable();
+    }
+
+    // --- KPI Rendering ---
+    function updateKPIs() {
+      const totalQty = filteredData.reduce((acc, d) => acc + d.quantity, 0);
+      const uniqueItems = new Set(filteredData.map(d => d.item)).size;
+      const uniqueWh = new Set(filteredData.map(d => d.warehouse)).size;
+      const alertQty = filteredData.reduce((acc, d) => d.isLongTerm ? acc + d.quantity : acc, 0);
+
+      document.getElementById('kpi-total-qty').innerText = totalQty.toLocaleString();
+      document.getElementById('kpi-total-items').innerText = uniqueItems.toLocaleString();
+      document.getElementById('kpi-total-wh').innerText = uniqueWh.toLocaleString();
+      document.getElementById('kpi-alert-qty').innerText = alertQty.toLocaleString();
+    }
+
+    // --- UI Theme Color Utility ---
+    function isDark() {
+      return document.documentElement.classList.contains('dark');
+    }
+
+    // --- Chart.js Visualization Logic ---
+    function renderCharts() {
+      // Color Palettes adjusted dynamically
+      const textCol = isDark() ? '#94a3b8' : '#475569';
+      const gridCol = isDark() ? '#1e293b' : '#f1f5f9';
+
+      // Chart 1: Warehouse Stock Bar Chart
+      const whDataMap = {};
+      filteredData.forEach(d => {
+        whDataMap[d.warehouse] = (whDataMap[d.warehouse] || 0) + d.quantity;
+      });
+      const whLabels = Object.keys(whDataMap);
+      const whValues = Object.values(whDataMap);
+
+      if (charts.wh) charts.wh.destroy();
+      charts.wh = new Chart(document.getElementById('chart-wh').getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: whLabels,
+          datasets: [{
+            label: '재고량',
+            data: whValues,
+            backgroundColor: '#6366f1',
+            borderRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { color: gridCol }, ticks: { color: textCol } },
+            y: { grid: { color: gridCol }, ticks: { color: textCol } }
+          }
+        }
+      });
+
+      // Chart 2: Top Items (Horizontal Bar)
+      const itemDataMap = {};
+      filteredData.forEach(d => {
+        itemDataMap[d.item] = (itemDataMap[d.item] || 0) + d.quantity;
+      });
+      const sortedItems = Object.entries(itemDataMap)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5); // top 5
+      const itemLabels = sortedItems.map(x => x[0]);
+      const itemValues = sortedItems.map(x => x[1]);
+
+      if (charts.items) charts.items.destroy();
+      charts.items = new Chart(document.getElementById('chart-items').getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: itemLabels,
+          datasets: [{
+            label: '수량',
+            data: itemValues,
+            backgroundColor: '#10b981',
+            borderRadius: 6
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { color: gridCol }, ticks: { color: textCol } },
+            y: { grid: { color: gridCol }, ticks: { color: textCol } }
+          }
+        }
+      });
+
+      // Chart 3: Location Doughnut Chart
+      const locDataMap = {};
+      filteredData.forEach(d => {
+        locDataMap[d.location] = (locDataMap[d.location] || 0) + d.quantity;
+      });
+      const locLabels = Object.keys(locDataMap);
+      const locValues = Object.values(locDataMap);
+
+      if (charts.location) charts.location.destroy();
+      charts.location = new Chart(document.getElementById('chart-location').getContext('2d'), {
+        type: 'doughnut',
+        data: {
+          labels: locLabels,
+          datasets: [{
+            data: locValues,
+            backgroundColor: [
+              '#f59e0b', '#3b82f6', '#ec4899', '#8b5cf6', '#14b8a6', '#f43f5e'
+            ],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: textCol, boxWidth: 12 }
+            }
+          }
+        }
+      });
+    }
+
+    // --- Table Rendering with Pagination ---
+    function renderTable() {
+      const tableBody = document.getElementById('table-body');
+      const rowCount = document.getElementById('table-row-count');
+      const pageIndicator = document.getElementById('page-indicator');
+      const prevBtn = document.getElementById('prev-page');
+      const nextBtn = document.getElementById('next-page');
+
+      rowCount.innerText = `${filteredData.length.toLocaleString()}건`;
+      
+      const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
+      if (currentPage > totalPages) currentPage = totalPages;
+
+      pageIndicator.innerText = `Page ${currentPage} of ${totalPages}`;
+      prevBtn.disabled = currentPage === 1;
+      nextBtn.disabled = currentPage === totalPages;
+
+      tableBody.innerHTML = '';
+
+      if (filteredData.length === 0) {
+        tableBody.innerHTML = `
+          <tr>
+            <td colspan="7" class="px-6 py-12 text-center text-slate-400 dark:text-slate-500">
+              필터 매칭 데이터가 없습니다.
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      const startIndex = (currentPage - 1) * itemsPerPage;
+      const paginatedItems = filteredData.slice(startIndex, startIndex + itemsPerPage);
+
+      paginatedItems.forEach(d => {
+        const inDateStr = d.inDate ? d.inDate.toISOString().split('T')[0] : '-';
+        const limitDateStr = d.limitDate ? d.limitDate.toISOString().split('T')[0] : 'NULL (90일 자동)';
+        
+        const badge = d.isLongTerm
+          ? `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400"><span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>경고</span>`
+          : `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>정상</span>`;
+
+        tableBody.innerHTML += `
+          <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-900/40 transition">
+            <td class="px-6 py-4 font-semibold text-brand-600 dark:text-brand-400">${d.warehouse}</td>
+            <td class="px-6 py-4 font-mono text-xs tracking-wider">${d.item}</td>
+            <td class="px-6 py-4 text-center text-slate-500 dark:text-slate-400">${inDateStr}</td>
+            <td class="px-6 py-4 text-right font-bold">${d.quantity.toLocaleString()}</td>
+            <td class="px-6 py-4 font-medium text-slate-600 dark:text-slate-300">${d.location}</td>
+            <td class="px-6 py-4 text-center text-xs text-slate-400 dark:text-slate-500">${limitDateStr}</td>
+            <td class="px-6 py-4 text-center">${badge}</td>
+          </tr>
+        `;
+      });
+    }
+
+    // --- State Transitions ---
+    function initDashboard() {
+      uploadContainer.classList.add('hidden');
+      dashboardContent.classList.remove('hidden');
+      resetBtn.classList.remove('hidden');
+      resetBtn.classList.add('flex');
+
+      initFilters();
+      applyFilters();
+    }
+
+    function resetDashboard() {
+      rawStockData = [];
+      filteredData = [];
+      
+      // Destroy charts to free memory
+      Object.values(charts).forEach(chart => chart.destroy());
+      charts = {};
+
+      fileInput.value = '';
+      uploadContainer.classList.remove('hidden');
+      dashboardContent.classList.add('hidden');
+      resetBtn.classList.add('hidden');
+      resetBtn.classList.remove('flex');
+    }
+
+    // --- Event Listeners ---
+    
+    // Drag & Drop
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('border-brand-500', 'bg-slate-50', 'dark:bg-slate-900');
+    });
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('border-brand-500', 'bg-slate-50', 'dark:bg-slate-900');
+    });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('border-brand-500', 'bg-slate-50', 'dark:bg-slate-900');
+      if (e.dataTransfer.files.length) {
+        handleFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length) {
+        handleFile(e.target.files[0]);
+      }
+    });
+
+    resetBtn.addEventListener('click', resetDashboard);
+
+    // Filters event listeners
+    filterWh.addEventListener('change', applyFilters);
+    filterLoc.addEventListener('change', applyFilters);
+    filterSearch.addEventListener('input', applyFilters);
+
+    // Pagination
+    document.getElementById('prev-page').addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage--;
+        renderTable();
+      }
+    });
+    document.getElementById('next-page').addEventListener('click', () => {
+      const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+      if (currentPage < totalPages) {
+        currentPage++;
+        renderTable();
+      }
+    });
+
+    // Theme Toggle
+    themeToggle.addEventListener('click', () => {
+      const html = document.documentElement;
+      if (html.classList.contains('dark')) {
+        html.classList.remove('dark');
+        localStorage.setItem('theme', 'light');
+        themeIcon.setAttribute('data-lucide', 'moon');
+      } else {
+        html.classList.add('dark');
+        localStorage.setItem('theme', 'dark');
+        themeIcon.setAttribute('data-lucide', 'sun');
+      }
+      lucide.createIcons();
+      // Redraw charts with adapted themes
+      if (rawStockData.length > 0) renderCharts();
+    });
+
+    // Load saved theme
+    if (localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.classList.add('dark');
+      themeIcon.setAttribute('data-lucide', 'sun');
+    } else {
+      document.documentElement.classList.remove('dark');
+      themeIcon.setAttribute('data-lucide', 'moon');
+    }
+
+    // Initialize Lucide icons on load
+    lucide.createIcons();
+  </script>
+</body>
+</html>
